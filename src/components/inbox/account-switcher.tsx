@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useRef } from 'react';
-import { ChevronDown, Check, Plus, X, LogOut } from 'lucide-react';
+import { Check, Plus, X, LogOut } from 'lucide-react';
 import {
   getAccounts,
   getActiveEmail,
@@ -55,6 +55,8 @@ export function AccountSwitcher({ onSignOut }: AccountSwitcherProps) {
   const active = accounts.find((a) => a.email === activeEmail);
   if (!active) return null;
 
+  const initial = (active.displayName || active.email).trim().charAt(0).toUpperCase() || '?';
+
   const handleSwitch = (email: string) => {
     if (email !== activeEmail) setActiveEmail(email);
     setOpen(false);
@@ -84,24 +86,23 @@ export function AccountSwitcher({ onSignOut }: AccountSwitcherProps) {
         style={{
           fontFamily: 'var(--font-mono)',
           fontSize: '11px',
-          color: 'var(--text-muted)',
+          fontWeight: 500,
+          lineHeight: 1,
+          color: 'var(--bg-base)',
+          background: 'var(--text-primary)',
+          width: '22px',
+          height: '22px',
+          borderRadius: '9999px',
           display: 'inline-flex',
           alignItems: 'center',
-          gap: '4px',
-          maxWidth: '220px',
+          justifyContent: 'center',
+          flexShrink: 0,
+          cursor: 'pointer',
         }}
-        title="Switch Gmail account"
+        title={`${active.email} — switch account`}
+        aria-label={`Switch Gmail account (${active.email})`}
       >
-        <span
-          style={{
-            overflow: 'hidden',
-            textOverflow: 'ellipsis',
-            whiteSpace: 'nowrap',
-          }}
-        >
-          {active.email}
-        </span>
-        <ChevronDown size={11} style={{ flexShrink: 0 }} />
+        {initial}
       </button>
 
       {open && (
