@@ -18,7 +18,7 @@ import { SidebarMenu } from './sidebar-menu';
 import { useRouter } from 'next/navigation';
 import { Settings, Menu, Search, Bug } from 'lucide-react';
 import { useAuth } from '@/components/providers';
-import { getAccessToken, getActiveEmail, setActiveEmail as setGmailActiveEmail, getAccounts, type Account } from '@/lib/gmail-token';
+import { getAccessToken, getActiveEmail, setActiveEmail as setGmailActiveEmail, getAccounts, getRefreshToken, refreshAccessToken, type Account } from '@/lib/gmail-token';
 import { ParsedEmail, GmailApiError } from '@/types/gmail';
 import { Section } from '@/types/preferences';
 import {
@@ -123,6 +123,7 @@ export function SplitInbox() {
   const [specialViewEmailCount, setSpecialViewEmailCount] = useState(0);
   const [composeState, setComposeState] = useState<ComposeState | null>(null);
   const [hasToken, setHasToken] = useState(false);
+  const [recoveryFailed, setRecoveryFailed] = useState(false);
   const [activeEmail, setActiveEmail] = useState<string | null>(null);
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [rateLimitedUntil, setRateLimitedUntil] = useState(0);
@@ -150,19 +151,46 @@ export function SplitInbox() {
   const fullscreenRef = useRef<FullscreenEmailHandle>(null);
 
   useEffect(() => {
+    let cancelled = false;
     const check = () => {
-      setHasToken(!!getAccessToken());
+      if (cancelled) return;
+      const token = !!getAccessToken();
+      setHasToken(token);
       setActiveEmail(getActiveEmail());
       setAccounts(getAccounts());
+      if (token) setRecoveryFailed(false);
     };
     check();
     const onReady = () => check();
     const onAccountChanged = () => check();
     window.addEventListener('cleave:token-ready', onReady);
     window.addEventListener('cleave:account-changed', onAccountChanged);
-    // Fallback timeout: if no token after 10s, let the UI show a recovery option
-    const timeout = setTimeout(check, 10_000);
+
+    // Mobile Safari clears sessionStorage when it cold-restores a backgrounded
+    // tab, so the Gmail access token is usually gone on reopen even though the
+    // Supabase session cookie is still valid (middleware lets the user onto /).
+    // Don't passively wait for providers.tsx to recover — actively refresh here.
+    // The refresh token lives in localStorage, which survives the tab restore.
+    if (!getAccessToken()) {
+      if (getRefreshToken()) {
+        refreshAccessToken()
+          .then(() => { if (!cancelled) check(); })
+          .catch(() => { if (!cancelled) setRecoveryFailed(true); });
+      } else {
+        // Nothing to recover from — surface the manual escape hatch.
+        setRecoveryFailed(true);
+      }
+    }
+
+    // Fallback: if a token still hasn't materialised after 10s, re-check and
+    // offer a manual recovery option so the user is never stuck on the spinner.
+    const timeout = setTimeout(() => {
+      if (cancelled) return;
+      check();
+      if (!getAccessToken()) setRecoveryFailed(true);
+    }, 10_000);
     return () => {
+      cancelled = true;
       window.removeEventListener('cleave:token-ready', onReady);
       window.removeEventListener('cleave:account-changed', onAccountChanged);
       clearTimeout(timeout);
@@ -781,14 +809,32 @@ export function SplitInbox() {
   if (!hasToken) {
     return (
       <div className="h-full flex items-center justify-center" style={{ background: 'var(--bg-base)' }}>
-        <div className="text-center space-y-2">
-          <span
-            className="inline-block w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin"
-            style={{ color: 'var(--text-muted)' }}
-          />
+        <div className="text-center space-y-3">
+          {!recoveryFailed && (
+            <span
+              className="inline-block w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin"
+              style={{ color: 'var(--text-muted)' }}
+            />
+          )}
           <p style={{ fontFamily: 'var(--font-mono)', fontSize: '12px', color: 'var(--text-muted)' }}>
-            connecting...
+            {recoveryFailed ? "couldn't reconnect" : 'connecting...'}
           </p>
+          {recoveryFailed && (
+            <button
+              onClick={signOut}
+              className="inline-block px-4 py-2 transition-colors"
+              style={{
+                background: 'var(--bg-surface)',
+                border: '1px solid var(--border-default)',
+                color: 'var(--text-primary)',
+                fontFamily: 'var(--font-mono)',
+                fontSize: '12px',
+                cursor: 'pointer',
+              }}
+            >
+              sign in again
+            </button>
+          )}
         </div>
       </div>
     );
